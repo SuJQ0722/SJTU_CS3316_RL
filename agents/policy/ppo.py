@@ -6,9 +6,9 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 from torch.distributions import Normal
-from gae import compute_gae
-from agents.policy.policy_networks import GaussianPolicy, ValueNetwork
-
+from .gae import compute_gae
+from .policy_networks import GaussianPolicy, ValueNetwork
+from tqdm import tqdm
 
 class PPOAgent:
     def __init__(self,
@@ -27,7 +27,10 @@ class PPOAgent:
                  ):
         self.env = gym.make(env_name)
         obs_dim = self.env.observation_space.shape[0]
-        act_dim = self.env.action_space.shape[0]
+        if isinstance(self.env.action_space, gym.spaces.Discrete):
+            act_dim = self.env.action_space.n
+        else:
+            act_dim = self.env.action_space.shape[0]
 
         self.device = device
         self.policy = GaussianPolicy(obs_dim, act_dim, hidden_sizes).to(device)
@@ -50,12 +53,12 @@ class PPOAgent:
         :return:
         """
         obs_list, act_list, logp_list, reward_list, value_list, done_list = [], [], [], [], [], []
-        obs = self.env.reset()
+        obs, info = self.env.reset()
         done = False
         for _ in range(horizen):
             obs_tensor = torch.tensor(obs, dtype=torch.float32).to(self.device)
             dist = self.policy.get_distribution(obs_tensor)
-            action = dist.sample.cpu().numpy()
+            action = dist.sample().cpu().numpy()
             logp = dist.log_prob(torch.tensor(action, dtype=torch.float32).to(self.device))
             value = self.value(obs_tensor).item()
 
@@ -63,7 +66,7 @@ class PPOAgent:
 
             obs_list.append(obs)
             act_list.append(action)
-            logp_list.append(logp)
+            logp_list.append(logp.detach().cpu().item())
             reward_list.append(reward)
             value_list.append(value)
             done_list.append(done)
@@ -87,8 +90,8 @@ class PPOAgent:
         obs = trajectories['obs']
         acts = trajectories['acts']
         logps_old = trajectories['logps']
-        rewards = trajectories['rews']
-        values = trajectories['vals']
+        rewards = trajectories['rewards']
+        values = trajectories['values']
         dones = trajectories['dones']
         last_val = trajectories['last_val']
 
@@ -120,4 +123,26 @@ class PPOAgent:
                 mb_logp = dist.log_prob(mb_acts)
                 mb_entropy = dist.entropy().sum(axis=-1).mean()
                 mb_val = self.value(mb_obs).squeeze(-1)
+
+                ratio = torch.exp(mb_logp - mb_old_logp)
+                surr1 = ratio * mb_adv
+                surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1+ self.clip_epsilon) * mb_adv
+                loss_actor = -torch.min(surr1, surr2).mean()
+                loss_critic = (mb_val - mb_ret).pow(2).mean()
+                loss = loss_actor + self.vf_coef * loss_critic - self.ent_coef * mb_entropy
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(list(self.policy.parameters()) + list(self.value.parameters()), self.max_grad_norm)
+                self.optimizer.step()
+
+    def train(self, total_steps, horizon=2048):
+        step_counter = 0
+        with tqdm(total=total_steps) as pbar:
+            while step_counter < total_steps:
+                traj = self.collect_trajectories(horizon)
+                self.update(traj)
+                step_counter += horizon
+                pbar.update(horizon)
+                pbar.set_postfix({"Last V(s)": f"{traj['values'][-1]:.3f}"})
 
