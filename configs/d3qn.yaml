@@ -2,12 +2,12 @@
 # Hyperparameters for Dueling Double DQN (D3QN) on BreakoutNoFrameskip-v4
 algo:
   name: "D3QN"                    # 算法名称
-  type: "dqn"                     # 算法类型 (DQN, Dueling DQN, Double DQN, etc.)
+  type: "value-based"                     # 算法类型 (DQN, Dueling DQN, Double DQN, etc.)
 # -- Environment Settings --
 env:
   id: "Atari" # Atari 环境 ID
   frame_stack: 4               # 堆叠的帧数，让智能体感知动态
-
+  max_episode_steps: 2000
 # -- Training Settings --
 training:
   seed: 42                       # 随机种子，用于复现实验结果

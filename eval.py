@@ -9,6 +9,8 @@ import yaml
 import os
 
 from agents.ppo.model import ActorCritic
+from agents.d3qn.model import D3QN
+from envs.atari_wrappers import make_atari
 
 def evaluate_agent(config, env_name, model_path, num_episodes=10, render=False, record=False):
     """
@@ -23,25 +25,26 @@ def evaluate_agent(config, env_name, model_path, num_episodes=10, render=False, 
     """
     env_config = config['env']
     agent_config = config['agent']
-    
-    # 1. 创建环境
+    algo = config['algo']['name']
     render_mode = "human" if render else "rgb_array" if record else None
-    env = gym.make(env_name, render_mode=render_mode)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 2. 如果需要录制，使用 RecordVideo 封装器
+    if env_name in ['Hopper-v4', 'Ant-v4', 'Humanoid-v4', 'HalfCheetah-v4']:
+        env = gym.make(env_name, render_mode=render_mode)
+        network = ActorCritic(env.observation_space.shape[0], env.action_space.shape[0], tuple(agent_config['hidden_sizes'])).to(device)
+    elif env_name in ['ALE/Breakout-v5', 'ALE/Boxing-v5', 'ALE/Pong-v5', 'ALE/VideoPinball-v5']:
+        env = make_atari(env_name, max_episode_steps=env_config['max_episode_steps'], render_mode=render_mode)
+        network = D3QN(env.observation_space.shape, env.action_space.n).to(device)
+    else:
+        raise ValueError(f"Unsupported environment: {env_name}")
+
     if record:
         video_folder = os.path.join("videos", os.path.basename(os.path.dirname(model_path)))
         os.makedirs(video_folder, exist_ok=True)
-        # 封装环境，每隔 1 个 episode 录制一次
         env = RecordVideo(env, video_folder=video_folder, episode_trigger=lambda e: e % 1 == 0, name_prefix="eval")
         print(f"Recording videos to: {video_folder}")
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 3. 加载模型 (代码不变)
-    obs_dim = env.observation_space.shape[0]
-    act_dim = env.action_space.shape[0]
-    network = ActorCritic(obs_dim, act_dim, tuple(agent_config['hidden_sizes'])).to(device)
+    # load the model
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     network.load_state_dict(torch.load(model_path, map_location=device))
@@ -49,7 +52,7 @@ def evaluate_agent(config, env_name, model_path, num_episodes=10, render=False, 
 
     print(f"Evaluating model from {model_path} for {num_episodes} episodes...")
 
-    # 4. 运行评估循环 (代码不变)
+    # run the evaluation loop
     total_rewards = []
     for episode in range(num_episodes):
         obs, _ = env.reset()
@@ -58,19 +61,20 @@ def evaluate_agent(config, env_name, model_path, num_episodes=10, render=False, 
         while not done:
             with torch.no_grad():
                 obs_tensor = torch.tensor(obs, dtype=torch.float32).to(device).unsqueeze(0)
-                action, _, _, _ = network.get_action_and_value(obs_tensor)
-                
-            obs, reward, terminated, truncated, info = env.step(action.cpu().numpy().flatten())
+                if algo == 'PPO':
+                    action = network.get_action_and_value(obs_tensor)[0].cpu().numpy().flatten()
+                elif algo == 'D3QN':
+                    action = network(obs_tensor).argmax(dim=1).item()
+            obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             episode_reward += reward
 
         total_rewards.append(episode_reward)
         print(f"Episode {episode + 1}/{num_episodes}, Reward: {episode_reward:.2f}")
 
-    # RecordVideo wrapper 需要调用 close() 来确保所有视频文件都被正确保存和关闭
     env.close()
 
-    # 5. 报告结果 (代码不变)
+    # report results
     mean_reward = np.mean(total_rewards)
     std_reward = np.std(total_rewards)
     
@@ -85,15 +89,15 @@ if __name__ == "__main__":
                         help="Path to the config file used for training")
     parser.add_argument("--model_path", type=str, required=True, 
                         help="Path to the trained model .pth file")
-    parser.add_argument("--episodes", type=int, default=3, 
+    parser.add_argument("--env_name", type=str, required=True,
+                        help="Environment name to use for evaluation (default: Hopper-v4)")
+    parser.add_argument("--episodes", type=int, default=10, 
                         help="Number of episodes to run for evaluation")
     parser.add_argument("--render", action="store_true", 
                         help="Render the environment in real-time (requires a display)")
     # 新增 --record 参数
     parser.add_argument("--record", action="store_true",
                         help="Record the evaluation to a video file")
-    parser.add_argument("--env_name", type=str, default="Hopper-v4",
-                        help="Environment name to use for evaluation (default: Hopper-v4)")
 
     args = parser.parse_args()
 

@@ -25,7 +25,7 @@ class D3QNAgent:
         np.random.seed(self.train_config['seed'])
         torch.manual_seed(self.train_config['seed'])
 
-        self.env = make_atari(env_name, self.env_config['frame_stack'])
+        self.env = make_atari(env_name, max_episode_steps=self.env_config['max_episode_steps'])
 
         self.q_network = D3QN(self.env.observation_space.shape, self.env.action_space.n).to(self.device)
         self.target_q_network = D3QN(self.env.observation_space.shape, self.env.action_space.n).to(self.device)
@@ -56,14 +56,16 @@ class D3QNAgent:
     def save_model(self, step):
         """save the model weights to a file"""
         model_path = os.path.join(self.save_dir, f"model_step_{step}.pth")
-        torch.save(self.network.state_dict(), model_path)
+        torch.save(self.q_network.state_dict(), model_path)
         print(f"Model saved to {model_path}")
 
     def load_model(self, model_path):
         """load the model weights from a file"""
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found at {model_path}")
-        self.network.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.q_network.load_state_dict(torch.load(model_path, map_location=self.device))
+        # Initialize target network with the same weights as q_network
+        self.target_q_network.load_state_dict(self.q_network.state_dict())
         print(f"Model loaded from {model_path}")
 
     def _update(self, step):
@@ -86,8 +88,8 @@ class D3QNAgent:
         loss.backward()
         self.optimizer.step()
 
-        if step % self.agent_config['target_update_interval'] == 0:
-            self.logger.log({"losses/q_loss": loss.item()}, step=step)
+        # if step % self.agent_config['target_update_interval'] == 0:
+        self.logger.log({"losses/q_loss": loss.item()}, step=step)
 
     def learn(self):
         obs, _ = self.env.reset(seed=self.train_config['seed'])
@@ -124,9 +126,12 @@ class D3QNAgent:
                     self.logger.log({
                         "charts/episodic_return": info['episode']['r'],
                         "charts/episodic_length": info['episode']['l'],
+                        "charts/episodic_time": info['episode']['t'],
                         "charts/epsilon": epsilon,
                     }, step=step)
-                obs, _ = self.env.reset()
+                # 在重置之前打印episode统计信息
+                # print(f"Episode finished after {ep_len} steps with return: {ep_return:.2f}")
+                obs, info = self.env.reset()
                 ep_return = 0
                 ep_len = 0
 

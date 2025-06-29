@@ -21,9 +21,9 @@ def main():
     parser.add_argument("--report_to", type=str, default="wandb", help="Reporting tool (default: wandb)")
     args = parser.parse_args()
 
-    if args.env_name in ['Hopper-v4', 'Ant-v4']:
+    if args.env_name in ['Hopper-v4', 'Ant-v4', 'Humanoid-v4', 'HalfCheetah-v4']:
         config_path = 'configs/ppo.yaml'
-    elif args.env_name in ['ALE/Breakout-v5']:
+    elif args.env_name in ['ALE/Breakout-v5', 'ALE/Boxing-v5', 'ALE/Pong-v5', 'ALE/VideoPinball-v5']:
         config_path = 'configs/d3qn.yaml'
     else:
         raise ValueError(f"Unknown environment: {args.env_name}")

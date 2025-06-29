@@ -7,6 +7,7 @@ import numpy as np
 from collections import deque
 import cv2
 import ale_py
+from gymnasium.wrappers import RecordEpisodeStatistics
 
 gym.register_envs(ale_py) 
 cv2.setNumThreads(0)
@@ -154,19 +155,19 @@ def wrap_deepmind(env, episode_life=True, clip_rewards=False, frame_stack=4, sca
         
     return env
 
-def make_atari(env_id, max_episode_steps=None, render_mode=None):
+def make_atari(env_id, max_episode_steps=2000, render_mode=None):
     """
     创建并封装一个 Atari 环境的工厂函数。
     """
     env = gym.make(env_id, max_episode_steps=max_episode_steps, render_mode=render_mode)
-    # 确保在所有 wrapper 之前先重置一次，避免 NoopResetEnv 的 bug
-    env.reset() 
+    env = RecordEpisodeStatistics(env)
     
     # 修正封装顺序，这很重要
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4) # 先跳帧再处理图像
     
     # wrap_deepmind 内部已经包含了 EpisodicLife, FireReset, WarpFrame, FrameStack, Permute
-    env = wrap_deepmind(env, episode_life=True, frame_stack=4)
+    # episode_life=False 让episodes更长，适合训练初期
+    env = wrap_deepmind(env, episode_life=False, frame_stack=4)
     
     return env

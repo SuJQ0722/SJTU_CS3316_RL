@@ -37,7 +37,7 @@ class PPOAgent:
         act_dim = self.env.action_space.shape[0]
 
         # --- 初始化网络和优化器 ---
-        self.network = ActorCritic(obs_dim, act_dim, tuple(self.agent_config['hidden_sizes'])).to(self.device)
+        self.network = ActorCritic(obs_dim, act_dim, tuple(self.agent_config['hidden_sizes']), shared=self.agent_config['shared']).to(self.device)
         self.optimizer = optim.Adam(self.network.parameters(), lr=self.agent_config['lr'], eps=1e-5)
 
         # --- 初始化日志 ---
